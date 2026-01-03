@@ -106,8 +106,10 @@ private struct TextViewRepresentable: NSViewRepresentable {
             textView.gutterView?.textColor = .secondaryLabelColor
         }
 
+        let ns = NSAttributedString(styledAttributedString(textView.typingAttributes))
         context.coordinator.isUpdating = true
-        textView.attributedText = NSAttributedString(styledAttributedString(textView.typingAttributes))
+        textView.attributedText = ns
+        context.coordinator.lastAppliedText = ns
         context.coordinator.isUpdating = false
 
         for plugin in plugins {
@@ -125,14 +127,21 @@ private struct TextViewRepresentable: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         let textView = scrollView.documentView as! STTextView
 
-        if !context.coordinator.isUserEditing {
+        let desired = NSAttributedString(
+            styledAttributedString(textView.typingAttributes)
+        )
+
+        if context.coordinator.lastAppliedText != desired {
             context.coordinator.isUpdating = true
-            textView.attributedText = NSAttributedString(styledAttributedString(textView.typingAttributes))
+            textView.attributedText = desired
+            context.coordinator.lastAppliedText = desired
             context.coordinator.isUpdating = false
         }
-        context.coordinator.isUserEditing = false
 
-        if textView.textSelection != selection, let selection {
+        if !context.coordinator.suppressSelectionSync,
+           !context.coordinator.isSelecting,
+           let selection,
+           textView.textSelection != selection {
             textView.textSelection = selection
         }
 
@@ -195,7 +204,10 @@ private struct TextViewRepresentable: NSViewRepresentable {
         @Binding var selection: NSRange?
         var isUpdating = false
         var isUserEditing = false
+        var isSelecting = false
         var lastFont: NSFont?
+        var lastAppliedText: NSAttributedString?
+        var suppressSelectionSync = false
 
         init(text: Binding<AttributedString>, selection: Binding<NSRange?>) {
             self._text = text
@@ -203,21 +215,33 @@ private struct TextViewRepresentable: NSViewRepresentable {
         }
 
         func textViewDidChangeText(_ notification: Notification) {
-            guard !isUpdating, let textView = notification.object as? STTextView else {
-                return
+            guard !isUpdating,
+                  let textView = notification.object as? STTextView
+            else { return }
+
+            if let um = textView.undoManager, um.isUndoing || um.isRedoing {
+                suppressSelectionSync = true
             }
-            isUserEditing = true
-            text = AttributedString(textView.attributedText ?? NSAttributedString())
+
+            let newText = AttributedString(textView.attributedText ?? NSAttributedString())
+
+            DispatchQueue.main.async { [weak self] in
+                self?.text = newText
+            }
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard !isUpdating, let textView = notification.object as? STTextView else {
-                return
+            guard !isUpdating,
+                  let textView = notification.object as? STTextView
+            else { return }
+
+            let newSelection = textView.selectedRange()
+
+            DispatchQueue.main.async { [weak self] in
+                self?.selection = newSelection
+                self?.suppressSelectionSync = false
             }
-
-            selection = textView.selectedRange()
         }
-
     }
 }
 
