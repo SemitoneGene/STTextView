@@ -1332,6 +1332,15 @@ open class STTextView: NSView, NSTextInput, NSTextContent, STTextViewProtocol {
         super.layout()
         layoutText()
 
+        if let scrollView = enclosingScrollView {
+            let clipHeight = scrollView.contentView.bounds.height
+            if frame.height < clipHeight {
+                var s = frame.size
+                s.height = clipHeight
+                super.setFrameSize(s)
+            }
+        }
+        
         if needsScrollToSelection, let textRange = textLayoutManager.textSelections.last?.textRanges.last {
             scrollToVisible(textRange, type: .standard)
         }
